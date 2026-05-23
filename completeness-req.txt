@@ -1,0 +1,39 @@
+# Algorithm Completeness Relaxation for Large-KSK DNSSEC
+
+## Summary
+The draft's signing scheme (PQ KSK signs only DNSKEY RRset; Ed25519 ZSK signs all other RRsets) violates RFC 4035 §2.2 and RFC 6840 §5.11 as currently written. The draft must formally Update both RFCs and justify the relaxation.
+
+## The violation
+RFC 4035 §2.2 and RFC 6840 §5.11 require that every authoritative RRset in the zone be signed by every algorithm present in the apex DNSKEY RRset (not just those in the DS). Since the PQ KSK is in the apex DNSKEY RRset, strict reading requires PQ signatures on every RRset. The proposal does not do this — only the DNSKEY RRset gets the PQ signature.
+
+## Why the relaxation is safe (the actual security argument)
+Completeness exists to prevent algorithm downgrade attacks where algorithms play peer roles in DS and an attacker who breaks the weaker one can forge RRsets and strip signatures from the stronger one.
+
+In this proposal the algorithms are NOT peers. They have distinct structural roles in a fixed chain of trust:
+1. Parent DS authenticates PQ KSK (PQ signature on DNSKEY RRset)
+2. PQ-authenticated DNSKEY RRset contains Ed25519 ZSK as authenticated key material
+3. Ed25519 ZSK signs data RRsets
+
+An attacker who breaks Ed25519 can only forge signatures that validate against the currently published ZSK. They cannot substitute their own ZSK without forging the PQ signature on the DNSKEY RRset. If the ZSK rolls faster than the attacker can break it, the forgery window closes before it opens.
+
+The security argument is therefore "structural asymmetry plus rotation," not "completeness preserved." This needs to be articulated clearly in Security Considerations — it's where dnsop scrutiny will concentrate.
+
+## Required spec text (sketch)
+Something like: "This document updates RFC 4035 §2.2 and RFC 6840 §5.11 to permit a constrained form of partial algorithm coverage: a DNSKEY RRset MAY contain a KSK of algorithm A and a ZSK of algorithm B where A ≠ B, in which case the apex DNSKEY RRset MUST be signed by A, all other RRsets MUST be signed by B, and the DS RRset at the parent MUST contain only algorithm A."
+
+Header must declare "Updates: 4035, 6840".
+
+## Deployment implication (two validator changes, not one)
+1. Advisory signal: validators that see a "large KSK" algorithm in DS MAY use any transport (TCP, DoT, DoQ, future) they expect to handle the response size, going directly rather than via truncate-retry. Advisory only — transport choice belongs to validator, not protocol. Tying it to TCP specifically would bake in a transport choice at exactly the moment the transport landscape is diversifying.
+2. Relaxed completeness enforcement: validators must NOT mark zones bogus for missing PQ signatures on non-DNSKEY RRsets when they see this KSK/ZSK algorithm split configuration.
+
+The second is more invasive — it touches validation logic, not just transport selection. Deployment section needs to be clear-eyed about this.
+
+## Operational dependency worth flagging
+Parent ZSK rotation cadence becomes the security parameter protecting every child's KSK authenticity. Sloppy parent → child's PQ KSK no longer trustworthy in a post-CRQC world even though child did everything right. Worth considering whether parent ZSK age should be visible/auditable somehow. Rotation cadence should be tunable policy tied to threat estimates, not a fixed number.
+
+## Symmetry with SVCB transport work
+The DS signal ("expect large DNSKEY response") and SVCB transport hints ("here are the transports the server supports") compose naturally — together they give validators what they need to avoid truncate-retry without the protocol picking transport winners.
+
+## Scope clarification for the draft
+The signal is about the DNSKEY query specifically. Data queries under the ZSK stay small and UDP-friendly. The size cost is surgical, confined to the one query type that can absorb it. Easy to lose if a reader skims; it's the whole point.

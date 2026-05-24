@@ -158,25 +158,39 @@ large algorithm to the KSK.
 
 This document updates the signer-side requirement of {{RFC4035}} and
 {{RFC6840}} as follows. A zone MAY be signed under the following
-*algorithm-split profile*:
+*algorithm-split profile*. Let K be the set of algorithms appearing in
+the parent DS RRset for the zone, and let Z be a non-empty set of
+algorithms disjoint from K (K and Z share no algorithm). The profile
+holds when:
 
-* The parent DS RRset for the zone contains exactly one algorithm,
-  algorithm A.
+* The apex DNSKEY RRset of the zone contains at least one key of each
+  algorithm in K and at least one key of each algorithm in Z.
 
-* The apex DNSKEY RRset of the zone contains at least one key of
-  algorithm A and at least one key of a different algorithm B (A != B).
-
-* The apex DNSKEY RRset MUST be signed by algorithm A. It MAY
-  additionally be signed by algorithm B.
+* The apex DNSKEY RRset MUST be signed by every algorithm in K. It MAY
+  additionally be signed by one or more algorithms in Z.
 
 * Every non-DNSKEY authoritative RRset in the zone MUST be signed by
-  algorithm B and MUST NOT be required to be signed by algorithm A.
+  every algorithm in Z and MUST NOT be required to be signed by any
+  algorithm in K.
 
-Within this profile, algorithm A plays the role of the KSK algorithm
-and algorithm B plays the role of the ZSK algorithm. The profile is
-defined entirely in terms of the contents of the parent DS RRset and
-the apex DNSKEY RRset, so that compliance can be checked without
-reference to the (advisory) SEP bit.
+Within this profile, the algorithms in K play the role of KSK
+algorithms and the algorithms in Z play the role of ZSK algorithms.
+K and Z are disjoint by definition; no single algorithm can
+simultaneously serve as a KSK algorithm and a ZSK algorithm in this
+profile. The profile is defined entirely in terms of the contents of
+the parent DS RRset and the apex DNSKEY RRset, so that compliance can
+be checked without reference to the (advisory) SEP bit.
+
+The common steady-state case has |K| = |Z| = 1 (a single KSK algorithm
+A and a single ZSK algorithm B, with A != B). |K| > 1 corresponds to
+a KSK-algorithm rollover (the zone is transitioning between two KSK
+algorithms, both of which appear in the parent DS RRset and the apex
+DNSKEY RRset during the rollover window). |Z| > 1 corresponds to a
+ZSK-algorithm rollover (every non-DNSKEY RRset carries a signature
+from each old and new ZSK algorithm during the rollover window). A
+ZSK-algorithm rollover under this profile is no easier and no harder
+than the existing ZSK-algorithm rollover for an all-ZSK zone, and its
+size cost is the same.
 
 A zone that does not match this profile remains subject to the existing
 completeness rule of {{RFC4035}} Section 2.2 and {{RFC6840}} Section
@@ -187,22 +201,24 @@ completeness rule of {{RFC4035}} Section 2.2 and {{RFC6840}} Section
 This document also updates the validator-side behavior of {{RFC4035}}
 and {{RFC6840}}. When a validator processes a zone whose parent DS and
 apex DNSKEY RRsets match the algorithm-split profile of the preceding
-section, the validator:
+section, with KSK-algorithm set K and ZSK-algorithm set Z, the
+validator:
 
-* MUST validate the apex DNSKEY RRset using a signature of algorithm A
-  (the algorithm present in the parent DS RRset), as required by the
-  existing chain-of-trust rules.
+* MUST validate the apex DNSKEY RRset using a signature of some
+  algorithm in K (the algorithms present in the parent DS RRset), as
+  required by the existing chain-of-trust rules.
 
-* MUST validate non-DNSKEY RRsets of the zone using signatures of
-  algorithm B.
+* MUST validate non-DNSKEY RRsets of the zone using signatures of some
+  algorithm in Z.
 
 * MUST NOT treat the zone as Bogus solely because non-DNSKEY RRsets lack
-  signatures of algorithm A.
+  signatures of any algorithm in K.
 
-A validator that supports algorithm A but not algorithm B treats the
-zone as it would any zone whose data signatures are in an unsupported
-algorithm (see Section 5.2 of {{RFC4035}}). A validator that supports
-neither algorithm treats the delegation as Insecure, as today.
+A validator that supports some algorithm in K but no algorithm in Z
+treats the zone as it would any zone whose data signatures are in an
+unsupported algorithm (see Section 5.2 of {{RFC4035}}). A validator
+that supports no algorithm in K treats the delegation as Insecure, as
+today.
 
 The validator-side update is essential. Without it, a strict reading
 of the existing completeness rules would cause a conforming validator
@@ -214,8 +230,14 @@ the signer and validator sides.
 
 ## Why a Cadence Bound Is Required
 
-Under the algorithm-split profile of {{p-algsep}}, the KSK algorithm A
-and the ZSK algorithm B are not peers. They occupy distinct positions
+Under the algorithm-split profile of {{p-algsep}}, the KSK and ZSK
+algorithms are not peers. For readability the rest of this section
+describes the steady-state case |K| = |Z| = 1 with KSK algorithm A and
+ZSK algorithm B; the argument extends directly to rollover windows
+where K or Z is larger, in which case every algorithm in K plays the
+role of A and every algorithm in Z plays the role of B.
+
+The KSK algorithm A and the ZSK algorithm B occupy distinct positions
 in a fixed chain of trust:
 
 1. The parent DS RRset, validated by the parent's own chain of trust,
@@ -462,12 +484,15 @@ signatures from the stronger one. Completeness ensures that every
 RRset is independently protected under every algorithm a validator
 might choose.
 
-In the algorithm-split profile of {{p-algsep}}, the two algorithms are
-*not* peers. They occupy distinct, structurally asymmetric roles in a
-fixed chain of trust:
+In the algorithm-split profile of {{p-algsep}}, the KSK-side and
+ZSK-side algorithms are *not* peers. They occupy distinct,
+structurally asymmetric roles in a fixed chain of trust. As in
+{{p-zskcadence}}, the description below uses the steady-state case
+with KSK algorithm A and ZSK algorithm B; the argument extends
+directly to rollover windows with |K| > 1 or |Z| > 1.
 
-1. The parent's DS RRset (containing only algorithm A) authenticates
-   the child's KSK.
+1. The parent's DS RRset (containing only KSK-side algorithms; in the
+   steady state, only algorithm A) authenticates the child's KSK.
 2. The KSK (algorithm A) authenticates the apex DNSKEY RRset, which
    contains the ZSK (algorithm B) as authenticated key material.
 3. The ZSK (algorithm B) signs the non-DNSKEY RRsets of the zone.
